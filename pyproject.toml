@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "steam-library-manager"
 version = "0.1.0"
-description = "Linux terminal utility for managing Steam libraries by game name."
+description = "Linux CLI that searches your Steam library by name and automatically installs games using SteamCMD."
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }

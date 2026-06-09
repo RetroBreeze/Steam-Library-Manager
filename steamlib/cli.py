@@ -11,7 +11,16 @@ from rich.table import Table
 
 from . import actions
 from .cache import load_cache, require_cache, save_cache
-from .config import Config, SteamConfig, cache_path, config_path, expand_path, load_config, save_config
+from .config import (
+    Config,
+    SteamConfig,
+    SteamCMDConfig,
+    cache_path,
+    config_path,
+    expand_path,
+    load_config,
+    save_config,
+)
 from .local_steam import merge_games, scan_installed_games
 from .matcher import Match, is_clear_match, search_games
 from .models import Game
@@ -127,7 +136,12 @@ def _choose_match(
             return matches[int(answer) - 1].game
 
 
-def _steam_config_from_profile_input(profile_input: str, api_key: str, steam_root: str) -> SteamConfig:
+def _steam_config_from_profile_input(
+    profile_input: str,
+    api_key: str,
+    steam_root: str,
+    username: str = "",
+) -> SteamConfig:
     try:
         parsed = parse_steam_profile_input(profile_input)
     except ValueError as exc:
@@ -148,7 +162,119 @@ def _steam_config_from_profile_input(profile_input: str, api_key: str, steam_roo
         profile_input=profile_input.strip(),
         api_key=api_key,
         steam_root=steam_root,
+        username=username,
     )
+
+
+def _prompt_steamcmd_config(current: Config) -> tuple[str, SteamCMDConfig]:
+    username = Prompt.ask("Enter your Steam username for SteamCMD login", default=current.steam.username)
+    console.print("Where should SteamCMD install games?")
+    console.print("1. ~/SteamCMDLibrary")
+    console.print("2. Existing Steam library: ~/.local/share/Steam")
+    console.print("3. Custom path")
+    choice = Prompt.ask("Choose install location [1-3]", default="1")
+    if choice == "2":
+        if not Confirm.ask(
+            "Using an existing Steam library may work, but SteamCMD installs can behave differently "
+            "from Steam client installs. Continue?",
+            default=False,
+        ):
+            install_dir = "~/SteamCMDLibrary"
+        else:
+            install_dir = current.steam.steam_root or "~/.local/share/Steam"
+    elif choice == "3":
+        install_dir = Prompt.ask("SteamCMD install directory", default=current.steamcmd.install_dir)
+    else:
+        install_dir = "~/SteamCMDLibrary"
+    return username, SteamCMDConfig(
+        command=current.steamcmd.command,
+        install_dir=install_dir,
+        validate=current.steamcmd.validate,
+        force_platform=current.steamcmd.force_platform,
+    )
+
+
+def _steamcmd_missing_message(command: str) -> None:
+    console.print("[red]SteamCMD is not installed.[/red]\n")
+    console.print("Install it with:")
+    console.print("sudo pacman -S steamcmd\n")
+    console.print("Or use:")
+    console.print("slm install <game> --ui")
+
+
+def _install_dir_for_game(config: Config, game: Game) -> Path:
+    return actions.game_install_dir(expand_path(config.steamcmd.install_dir), game.name)
+
+
+def _prompt_installed_game_action(game: Game) -> str:
+    console.print(f"{game.name} is already installed.\n")
+    console.print("Options:")
+    console.print("1. Skip")
+    console.print("2. Validate with SteamCMD")
+    console.print("3. Launch")
+    console.print("4. Reinstall")
+    answer = Prompt.ask("Choose [1-4]", default="1")
+    return {"1": "skip", "2": "validate", "3": "launch", "4": "reinstall"}.get(answer, "skip")
+
+
+def _resolve_backend(backend: str, ui: bool) -> str:
+    if ui:
+        return "steam-ui"
+    if backend not in {"steamcmd", "steam-ui"}:
+        console.print("[red]Backend must be one of: steamcmd, steam-ui[/red]")
+        raise typer.Exit(2)
+    return backend
+
+
+def _print_dry_run(queries: list[str]) -> None:
+    console.print("Would install with SteamCMD:\n")
+    games = _cache_games()
+    for query in queries:
+        matches = search_games(query, games, limit=3)
+        if not matches:
+            console.print(f"{query:<10} -> no match")
+        elif is_clear_match(matches):
+            console.print(f"{query:<10} -> {matches[0].game.name}")
+        else:
+            names = " / ".join(match.game.name for match in matches)
+            console.print(f"{query:<10} -> needs selection: {names}")
+    console.print("\nNo SteamCMD commands were run.")
+
+
+def _run_steamcmd_install(config: Config, game: Game, *, validate: bool | None = None) -> bool:
+    install_dir = _install_dir_for_game(config, game)
+    console.print(f"Installing {game.name} with SteamCMD...")
+    console.print(f"Install directory: {install_dir}")
+    console.print("SteamCMD may ask for your Steam password or Steam Guard code.")
+    console.print("Credentials are handled by SteamCMD, not stored by slm.")
+    result = actions.run_steamcmd_install(
+        appid=game.appid,
+        install_dir=install_dir,
+        username=config.steam.username,
+        steamcmd=config.steamcmd,
+        validate=validate,
+    )
+    if result.successful:
+        console.print(f"[green]✓ {game.name} installed successfully.[/green]")
+        return True
+    if result.uncertain:
+        console.print(
+            "[yellow]? SteamCMD exited successfully, but no installed files were detected. "
+            "Check the install directory.[/yellow]"
+        )
+        return False
+    console.print(f"[red]✗ SteamCMD failed with exit code {result.returncode}.[/red]")
+    if result.no_subscription:
+        console.print(
+            "SteamCMD says this account does not own the game, or the depot is not available "
+            "through SteamCMD. Install it manually in Steam if you own it."
+        )
+    return False
+
+
+def _offer_ui_fallback(game: Game, config: Config, *, yes: bool = False) -> None:
+    if yes or Confirm.ask("Open Steam install prompt for this game?", default=True):
+        actions.open_steam_install_prompt(game.appid, config.commands)
 
 
 @app.command("config")
@@ -159,8 +285,10 @@ def configure() -> None:
     profile_input = Prompt.ask(STEAM_PROFILE_PROMPT, default=profile_default)
     api_key = Prompt.ask("Enter Steam Web API key", default=current.steam.api_key, password=True)
     steam_root = Prompt.ask("Steam root", default=current.steam.steam_root)
+    username, steamcmd = _prompt_steamcmd_config(current)
     config = Config(
-        steam=_steam_config_from_profile_input(profile_input, api_key, steam_root),
+        steam=_steam_config_from_profile_input(profile_input, api_key, steam_root, username),
+        steamcmd=steamcmd,
         commands=current.commands,
         ui=current.ui,
     )
@@ -177,8 +305,15 @@ def refresh() -> None:
         console.print("Steam Library Manager is not configured.")
         profile_input = Prompt.ask(STEAM_PROFILE_PROMPT)
         api_key = Prompt.ask("Enter Steam Web API key", password=True)
+        username, steamcmd = _prompt_steamcmd_config(config)
         config = Config(
-            steam=_steam_config_from_profile_input(profile_input, api_key, config.steam.steam_root),
+            steam=_steam_config_from_profile_input(
+                profile_input,
+                api_key,
+                config.steam.steam_root,
+                username,
+            ),
+            steamcmd=steamcmd,
             commands=config.commands,
             ui=config.ui,
         )
@@ -259,14 +394,30 @@ def install(
     yes: Annotated[bool, typer.Option("--yes", "-y")] = False,
     dry_run: Annotated[bool, typer.Option("--dry-run")] = False,
     skip_installed: Annotated[bool, typer.Option("--skip-installed")] = False,
+    ui: Annotated[bool, typer.Option("--ui", help="Use the Steam UI install prompt instead of SteamCMD.")] = False,
+    backend: Annotated[str, typer.Option("--backend")] = "steamcmd",
+    validate: Annotated[bool, typer.Option("--validate")] = False,
+    reinstall: Annotated[bool, typer.Option("--reinstall")] = False,
 ) -> None:
-    """Install one or more games through Steam."""
+    """Install one or more games with SteamCMD by default."""
     config = load_config()
     queries = queries or []
     if not queries:
         run_tui()
         return
-    selected: list[tuple[str, Game]] = []
+    selected_backend = _resolve_backend(backend, ui)
+    if dry_run and multi and selected_backend == "steamcmd":
+        _print_dry_run(queries)
+        return
+    if selected_backend == "steamcmd":
+        if not config.steam.username:
+            console.print("[red]SteamCMD username is not configured.[/red]")
+            console.print("Run: slm config")
+            raise typer.Exit(1)
+        if not dry_run and not actions.steamcmd_available(config.steamcmd):
+            _steamcmd_missing_message(config.steamcmd.command)
+            raise typer.Exit(1)
+    selected: list[tuple[str, Game, bool | None]] = []
     for index, query in enumerate(queries, start=1):
         if multi:
             console.print(f"Query {index}/{len(queries)}: {query}")
@@ -274,39 +425,73 @@ def install(
         if not game:
             continue
         if game.installed:
-            console.print(f"{game.name} is already installed.")
             if skip_installed:
+                console.print(f"{game.name} is already installed. Skipping.")
                 continue
-            if Confirm.ask("Launch it instead?", default=True):
+            if validate:
+                selected.append((query, game, True))
+                continue
+            if reinstall:
+                selected.append((query, game, True if validate else config.steamcmd.validate))
+                continue
+            action = _prompt_installed_game_action(game)
+            if action == "launch":
                 actions.launch_game(game.appid, config.commands, dry_run=dry_run)
+            elif action == "validate":
+                selected.append((query, game, True))
+            elif action == "reinstall":
+                selected.append((query, game, True if validate else config.steamcmd.validate))
             continue
-        selected.append((query, game))
+        selected.append((query, game, True if validate else config.steamcmd.validate))
     if not selected:
         console.print("No games selected for install.")
         return
     if dry_run:
-        console.print("Would install:")
-        for query, game in selected:
+        verb = "open Steam install prompt for" if selected_backend == "steam-ui" else "install with SteamCMD"
+        console.print(f"Would {verb}:")
+        for query, game, _ in selected:
             console.print(f"{query} -> {game.name}")
-        console.print("No Steam actions were opened.")
+        console.print(
+            "No Steam UI prompts were opened."
+            if selected_backend == "steam-ui"
+            else "No SteamCMD commands were run."
+        )
+        return
+    if selected_backend == "steam-ui":
+        for _, game, _ in selected:
+            console.print(f"Opening Steam install prompt for {game.name}...")
+            actions.open_steam_install_prompt(game.appid, config.commands)
         return
     if multi:
-        console.print("Selected for install:")
-        for index, (_, game) in enumerate(selected, start=1):
+        console.print("Selected for automatic SteamCMD install:")
+        for index, (_, game, _) in enumerate(selected, start=1):
             console.print(f"{index}. {game.name}")
-        if not yes and not Confirm.ask("Proceed with batch install?", default=True):
+        if not yes and not Confirm.ask(f"Install these {len(selected)} games with SteamCMD?", default=True):
             return
-    for _, game in selected:
-        console.print(f"Opening Steam install prompt for {game.name}...")
-        actions.install_game(game.appid, config.commands)
-        if multi and not yes:
-            answer = Prompt.ask(
-                "Press Enter after accepting/queuing it in Steam, S to skip, or Q to stop",
-                default="",
-                show_default=False,
-            )
-            if answer.casefold() == "q":
-                break
+    elif not yes and not Confirm.ask(
+        f"Install automatically with SteamCMD?", default=True
+    ):
+        return
+    failed: list[Game] = []
+    for index, (_, game, validate_choice) in enumerate(selected, start=1):
+        if multi:
+            console.print(f"Installing {index}/{len(selected)}: {game.name}")
+        if not _run_steamcmd_install(config, game, validate=validate_choice):
+            failed.append(game)
+            if not multi:
+                console.print(f"[red]✗ SteamCMD install failed for {game.name}.[/red]")
+                _offer_ui_fallback(game, config, yes=yes)
+    if multi:
+        console.print("\nInstall summary:\n")
+        for _, game, _ in selected:
+            marker = "✗" if game in failed else "✓"
+            console.print(f"{marker} {game.name}")
+        if failed:
+            noun = "game" if len(failed) == 1 else "games"
+            console.print(f"\n{len(failed)} {noun} failed. Failed games can be installed manually in Steam.")
+            if yes or Confirm.ask("Open Steam install prompts for failed games?", default=True):
+                for game in failed:
+                    actions.open_steam_install_prompt(game.appid, config.commands)
 
 
 @app.command()

@@ -19,6 +19,15 @@ class SteamConfig:
     profile_input: str = ""
     api_key: str = ""
     steam_root: str = "~/.local/share/Steam"
+    username: str = ""
+
+
+@dataclass(frozen=True)
+class SteamCMDConfig:
+    command: str = "steamcmd"
+    install_dir: str = "~/SteamCMDLibrary"
+    validate: bool = True
+    force_platform: str = ""
 
 
 @dataclass(frozen=True)
@@ -37,6 +46,7 @@ class UIConfig:
 @dataclass(frozen=True)
 class Config:
     steam: SteamConfig = SteamConfig()
+    steamcmd: SteamCMDConfig = SteamCMDConfig()
     commands: CommandsConfig = CommandsConfig()
     ui: UIConfig = UIConfig()
 
@@ -61,6 +71,7 @@ def load_config(path: Path | None = None) -> Config:
     with path.open("rb") as fh:
         data = tomllib.load(fh)
     steam = _section(data, "steam")
+    steamcmd = _section(data, "steamcmd")
     commands = _section(data, "commands")
     ui = _section(data, "ui")
     return Config(
@@ -69,6 +80,13 @@ def load_config(path: Path | None = None) -> Config:
             profile_input=str(steam.get("profile_input", "")),
             api_key=str(steam.get("api_key", "")),
             steam_root=str(steam.get("steam_root", "~/.local/share/Steam")),
+            username=str(steam.get("username", "")),
+        ),
+        steamcmd=SteamCMDConfig(
+            command=str(steamcmd.get("command", "steamcmd")),
+            install_dir=str(steamcmd.get("install_dir", "~/SteamCMDLibrary")),
+            validate=bool(steamcmd.get("validate", True)),
+            force_platform=str(steamcmd.get("force_platform", "")),
         ),
         commands=CommandsConfig(
             steam_command=str(commands.get("steam_command", "steam")),
@@ -90,7 +108,13 @@ def save_config(config: Config, path: Path | None = None) -> Path:
         f"steamid = {_toml_string(config.steam.steamid)}\n"
         f"profile_input = {_toml_string(config.steam.profile_input)}\n"
         f"api_key = {_toml_string(config.steam.api_key)}\n"
-        f"steam_root = {_toml_string(config.steam.steam_root)}\n\n"
+        f"steam_root = {_toml_string(config.steam.steam_root)}\n"
+        f"username = {_toml_string(config.steam.username)}\n\n"
+        "[steamcmd]\n"
+        f"command = {_toml_string(config.steamcmd.command)}\n"
+        f"install_dir = {_toml_string(config.steamcmd.install_dir)}\n"
+        f"validate = {str(config.steamcmd.validate).lower()}\n"
+        f"force_platform = {_toml_string(config.steamcmd.force_platform)}\n\n"
         "[commands]\n"
         f"steam_command = {_toml_string(config.commands.steam_command)}\n"
         f"open_command = {_toml_string(config.commands.open_command)}\n\n"

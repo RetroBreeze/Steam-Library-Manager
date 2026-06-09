@@ -1,6 +1,6 @@
 # Steam Library Manager
 
-Search, install, launch, and uninstall Steam games from your terminal.
+Search your Steam library by name and automatically install games using SteamCMD.
 
 ```bash
 slm install 007
@@ -14,18 +14,18 @@ slm launch portal
 
 ## What is it?
 
-**Steam Library Manager** is a Linux command-line tool for managing your Steam library by game name.
+**Steam Library Manager** is a Linux CLI that searches your Steam library by name and automatically installs games using SteamCMD.
 
-Steam can already install games by AppID, but AppIDs are annoying to look up. This tool lets you use the names you actually remember:
+SteamCMD can install games by AppID, but AppIDs are annoying to look up. This tool lets you use the names you actually remember:
 
 ```bash
 slm install "portal 2"
 ```
 
-Instead of:
+Instead of manually running:
 
 ```bash
-xdg-open "steam://install/620"
+steamcmd +force_install_dir "~/SteamCMDLibrary/Portal 2" +login "your_username" +app_update 620 validate +quit
 ```
 
 The main command is:
@@ -43,8 +43,8 @@ slm
 ## What can it do?
 
 * Search your Steam library by name
-* Install games by name
-* Install multiple games from one command
+* Install games by name automatically with SteamCMD
+* Install multiple games sequentially from one command
 * List installed and not-installed games
 * Launch games by name
 * Uninstall installed games safely through Steam
@@ -63,7 +63,58 @@ Found: Portal 2
 AppID: 620
 Installed: No
 
-Install Portal 2? [Y/n]
+Install automatically with SteamCMD? [Y/n]
+```
+
+## Automatic installs
+
+By default, `slm install` uses SteamCMD:
+
+```bash
+slm install "portal 2"
+```
+
+SteamCMD may ask for your Steam password or Steam Guard code. `slm` does not store your Steam password.
+
+If SteamCMD fails for a game, install that game manually in Steam or use:
+
+```bash
+slm install "portal 2" --ui
+```
+
+## Steam UI fallback
+
+To open Steam's normal install prompt instead of using SteamCMD:
+
+```bash
+slm install "portal 2" --ui
+```
+
+Equivalent backend selection is also available:
+
+```bash
+slm install "portal 2" --backend steam-ui
+slm install "portal 2" --backend steamcmd
+```
+
+## Install location
+
+By default, automatic installs go to:
+
+```text
+~/SteamCMDLibrary
+```
+
+Each game is installed into a clear per-game directory, such as:
+
+```text
+~/SteamCMDLibrary/Portal 2
+```
+
+You can change the base install directory during setup or in:
+
+```text
+~/.config/steam-library-manager/config.toml
 ```
 
 ## Install with a rough name
@@ -136,16 +187,16 @@ Choose game to install [1-3/s/q]:
 Then:
 
 ```text
-Selected for install:
+Selected for automatic SteamCMD install:
 
 1. 007 First Light
 2. Halo: The Master Chief Collection
 3. Sonic Mania
 
-Proceed with batch install? [Y/n]
+Install these 3 games with SteamCMD? [Y/n]
 ```
 
-The tool opens Steam install prompts one at a time.
+The tool installs games sequentially with SteamCMD.
 
 ## Search your library
 
@@ -287,6 +338,8 @@ On first run, the tool asks for:
 ```text
 Steam profile URL, custom ID, or SteamID64
 Steam Web API key
+Steam username for SteamCMD login
+SteamCMD install directory
 ```
 
 Accepted Steam profile inputs:
@@ -312,6 +365,14 @@ Cache is stored at:
 ~/.cache/steam-library-manager/library.json
 ```
 
+If SteamCMD is missing, install it yourself and retry:
+
+```bash
+sudo pacman -S steamcmd
+```
+
+`slm` does not install SteamCMD automatically.
+
 ## Commands
 
 ```bash
@@ -322,6 +383,7 @@ slm list --installed
 slm list --not-installed
 slm installed
 slm install <query>
+slm install <query> --ui
 slm install -m <query1> <query2> <query3>
 slm uninstall <query>
 slm uninstall -m <query1> <query2> <query3>
@@ -340,4 +402,4 @@ Steam Library Manager does **not**:
 * require sudo
 * directly delete game folders by default
 
-Install, uninstall, and launch actions are handed off to Steam.
+Automatic installs are handed off to SteamCMD. Uninstall and launch actions are handed off to Steam.
