@@ -282,12 +282,23 @@ slm refresh
 
 This updates the local cache of your Steam library and installed games.
 
-On first run, the tool may ask for:
+On first run, the tool asks for:
 
 ```text
-SteamID64
+Steam profile URL, custom ID, or SteamID64
 Steam Web API key
 ```
+
+Accepted Steam profile inputs:
+
+```text
+76561198012345678
+https://steamcommunity.com/profiles/76561198012345678
+https://steamcommunity.com/id/yourcustomname
+yourcustomname
+```
+
+SteamID64 is Steam's numeric account ID. You do not need to look it up manually if you paste your Steam profile URL or custom profile name.
 
 Config is stored at:
 

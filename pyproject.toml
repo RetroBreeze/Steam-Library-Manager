@@ -1,0 +1,35 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "steam-library-manager"
+version = "0.1.0"
+description = "Linux terminal utility for managing Steam libraries by game name."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "Steam Library Manager contributors" }]
+dependencies = [
+  "platformdirs>=4.0",
+  "pydantic>=2.0",
+  "rapidfuzz>=3.0",
+  "requests>=2.31",
+  "rich>=13.0",
+  "typer>=0.12",
+  "vdf>=3.4",
+]
+
+[project.optional-dependencies]
+test = ["pytest>=8.0"]
+tui = ["textual>=0.60"]
+
+[project.scripts]
+steamlib = "steamlib.cli:app"
+slm = "steamlib.cli:app"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["steamlib"]
